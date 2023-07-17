@@ -1,0 +1,80 @@
+####Newday Data Engineer Interview Homework####
+###Candidate - Sunil Rana #####
+
+import pandas
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import *
+from pyspark.sql.types import IntegerType,BooleanType,DateType
+from pyspark.sql.window import Window
+
+spark = SparkSession.builder.appName("Read DAT file").getOrCreate()
+
+delimiter = "::"  # Set the delimiter used in your .dat file
+
+#1. Read in movies.dat and ratings.dat to spark dataframes.
+#####import all the files#####
+movies_data = spark.read.text('C:/Users/User/Downloads/ml-1m/ml-1m/movies.dat')
+ratings_data = spark.read.text('C:/Users/User/Downloads/ml-1m/ml-1m/ratings.dat')
+users_data = spark.read.text('C:/Users/User/Downloads/ml-1m/ml-1m/users.dat')
+
+
+#####Movie Data#######
+movies_column = ["MovieID", "Title", "Genres"]
+movies_data  =movies_data.withColumn("columns", split(movies_data ["value"], delimiter))
+movies_data= movies_data.select(*[movies_data["columns"][i].alias(column_name) for i, column_name in enumerate(movies_column)])
+movies_data .show(20)
+
+#####Ratings Data#######
+ratings_column = ["UserID", "MovieID", "Rating", "Timestamp"]
+ratings_data  =ratings_data.withColumn("columns", split(ratings_data ["value"], delimiter))
+ratings_data= ratings_data.select(*[ratings_data["columns"][i].alias(column_name) for i, column_name in enumerate(ratings_column)])
+ratings_data .show(20)
+
+#####Users Data#######
+users_column = ["UserID", "Gender", "Age", "Occupation","Zip-code"]
+users_data  =users_data.withColumn("columns", split(users_data ["value"], delimiter))
+users_data= users_data.select(*[users_data["columns"][i].alias(column_name) for i, column_name in enumerate(users_column)])
+users_data .show(20)
+
+
+
+#2. Creates a new dataframe, which contains the movies data and 3 new columns max, min and average rating for that movie from the ratings data.
+
+movie_processed = movies_data .join(ratings_data, on="MovieID", how="left")
+movie_processed = movie_processed.withColumn("Timestamp", from_unixtime("Timestamp", format="yyyy-MM-dd HH:mm:ss")) 
+movie_processed= movie_processed.withColumn("MovieID",movie_processed.MovieID.cast(IntegerType())).sort("MovieID")
+movie_processed.show(20)
+
+movie_stats =movie_processed.groupBy("MovieID","Title") \
+	.agg(max("rating").alias("max_rating"), \
+	min("rating").alias("min_rating"), \
+	round(avg("rating"),2).alias("avg_rating")\
+	)
+movie_stats =movie_stats.sort("MovieID")
+movie_stats.show(20)
+
+#3. Create a new dataframe which contains each user’s (userId in the ratings data) top 3 movies based on their rating.
+
+rating_processed=ratings_data.withColumn("UserID",ratings_data.UserID.cast(IntegerType()))
+rating_processed =rating_processed.withColumn("Timestamp", from_unixtime("Timestamp", format="yyyy-MM-dd HH:mm:ss")) 
+rating_processed=rating_processed.withColumn("Rating",rating_processed.Rating.cast(IntegerType()))
+
+partition = Window.partitionBy("UserID").orderBy(desc("Rating"))
+rating_processed =rating_processed.withColumn("rank",dense_rank().over(partition )).sort('UserID',desc('Rating'))
+
+rating_stats =rating_processed.filter(col("rank") <= 3)
+rating_stats.show(20)
+
+
+#4. Write out the original and new dataframes in an efficient format of your choice.
+
+movie_stats_pd=movie_stats.toPandas()
+movie_stats_pd.to_csv("C:/TEMP/movie_stats.csv", sep=",", index=False)
+
+rating_stats_pd=rating_stats.toPandas()
+rating_stats_pd.to_csv("C:/TEMP/rating_stats.csv", sep=",", index=False)
+
+
+
+
+
